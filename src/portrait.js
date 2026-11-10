@@ -34,7 +34,7 @@ export function dropPortrait(canvas, data, options){
       balls.forEach(function(b){ var v = dark ? Math.round(64 + b.v * 0.75) : b.v; b.col = 'rgb(' + v + ',' + v + ',' + v + ')'; });
     }
     paint();
-    darkQuery.addEventListener('change', function(){ paint(); drawFinal(); });
+    darkQuery.addEventListener('change', function(){ paint(); if(running) redrawLanded(); else drawFinal(); });
 
     /* timing: rows start one after another, each ball gets a little random delay, then falls */
     var total = options.duration || 2400;
@@ -45,15 +45,26 @@ export function dropPortrait(canvas, data, options){
       balls.sort(function(a, b){ return a.t - b.t; });
     }
 
-    var store = document.createElement('canvas'), sctx = store.getContext('2d'), k = 1, raf = 0, landed = 0;
+    var store = document.createElement('canvas'), sctx = store.getContext('2d'), k = 1, raf = 0, landed = 0, running = false, lastW = 0;
     function size(){
       var rect = canvas.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+      lastW = rect.width;
       k = rect.width / data.w * dpr;
       [canvas, store].forEach(function(c){ c.width = Math.max(1, Math.round(rect.width * dpr)); c.height = Math.max(1, Math.round(rect.height * dpr)); });
       [ctx, sctx].forEach(function(c){ c.setTransform(k, 0, 0, k, 0, 0); });
     }
     function draw(c, b, y){ c.fillStyle = b.col; c.beginPath(); c.arc(b.x, y, R, 0, 6.2832); c.fill(); }
-    function drawFinal(){ cancelAnimationFrame(raf); size(); balls.forEach(function(b){ draw(ctx, b, b.y); }); }
+    function drawFinal(){ cancelAnimationFrame(raf); running = false; size(); balls.forEach(function(b){ draw(ctx, b, b.y); }); }
+    /* after a resize mid-animation: rebuild the balls that have already landed, keep the rest falling */
+    function redrawLanded(){ size(); for(var i = 0; i < landed; i++) draw(sctx, balls[i], balls[i].y); }
+
+    /* a resize must never cancel the animation. Laptops and phones fire resize events while the
+       page loads or the address bar hides, so only react when the portrait's width really changed. */
+    function onResize(){
+      var w = canvas.getBoundingClientRect().width;
+      if(Math.abs(w - lastW) < 1) return;
+      if(running) redrawLanded(); else drawFinal();
+    }
 
     /* gravity fall, then one small bounce */
     function fallY(b, p){
@@ -65,6 +76,7 @@ export function dropPortrait(canvas, data, options){
       cancelAnimationFrame(raf); size(); schedule(); landed = 0;
       sctx.clearRect(0, 0, data.w, data.h);
       if(reduce){ drawFinal(); if(options.onDone) options.onDone(); return; }
+      running = true;
       var t0 = performance.now(), end = balls[balls.length - 1].t + FALL;
       function frame(now){
         var t = now - t0;
@@ -77,12 +89,12 @@ export function dropPortrait(canvas, data, options){
           draw(ctx, b, p >= 1 ? b.y : fallY(b, p));
         }
         if(t < end + 30) raf = requestAnimationFrame(frame);
-        else { drawFinal(); if(options.onDone) options.onDone(); }
+        else { running = false; drawFinal(); if(options.onDone) options.onDone(); }
       }
       raf = requestAnimationFrame(frame);
     }
 
-    window.addEventListener('resize', drawFinal);
+    window.addEventListener('resize', onResize);
     replay();
     return { replay: replay, drawFinal: drawFinal };
   }
